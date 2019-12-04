@@ -70,7 +70,7 @@
 
 ### 监控
 tag见DashBoardStatsCounter
-![metrics](https://github.com/IQException/domino/blob/master/metrics.png?raw=true "metrics")
+![metrics](https://github.com/IQException/domino/blob/master/domino_metrics.png?raw=true "metrics")
 
 ### 日志
 待补充
