@@ -28,7 +28,6 @@
 7. Jackson序列化redis key/value,借助于公司的SSJsonSerializer支持契约对象
 
 ## 组件
-https://github.com/IQException/domino/blob/master/domino_metrics.png?raw=true
 ![组件关系图](https://github.com/IQException/domino/blob/master/%E6%88%AA%E5%9B%BE20190707210853.png?raw=true "主要组件" )
 ## 流程
 ![数据流程图](https://github.com/IQException/domino/blob/master/%E6%95%B0%E6%8D%AE%E6%B5%81%E7%A8%8B%E5%9B%BE.jpg?raw=true "数据流")
