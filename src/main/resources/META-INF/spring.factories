@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.ctrip.train.tieyouflight.domino.autoconfigure.MultiersCacheAutoConfiguration
