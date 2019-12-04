@@ -28,9 +28,10 @@
 7. Jackson序列化redis key/value,借助于公司的SSJsonSerializer支持契约对象
 
 ## 组件
-![组件关系图](https://github.com/IQException/domino/blob/master/%E6%88%AA%E5%9B%BE20190707210853.png "主要组件" )
+https://github.com/IQException/domino/blob/master/domino_metrics.png?raw=true
+![组件关系图](https://github.com/IQException/domino/blob/master/%E6%88%AA%E5%9B%BE20190707210853.png?raw=true "主要组件" )
 ## 流程
-![数据流程图](https://github.com/IQException/domino/blob/master/%E6%95%B0%E6%8D%AE%E6%B5%81%E7%A8%8B%E5%9B%BE.jpg "数据流")
+![数据流程图](https://github.com/IQException/domino/blob/master/%E6%95%B0%E6%8D%AE%E6%B5%81%E7%A8%8B%E5%9B%BE.jpg?raw=true "数据流")
 ## 使用
 ### 配置
 #### pom
@@ -66,11 +67,11 @@
 
 #### qconfig
 配置中心找到模板domino.t,根据它设置自己的缓存参数
-![domino.t](https://github.com/IQException/domino/blob/master/%E6%88%AA%E5%9B%BE20190707224113.png "domino.t")
+![domino.t](https://github.com/IQException/domino/blob/master/%E6%88%AA%E5%9B%BE20190707224113.png?raw=true "domino.t")
 
 ### 监控
 tag见DashBoardStatsCounter
-![metrics](https://github.com/IQException/domino/blob/master/metrics.png "metrics")
+![metrics](https://github.com/IQException/domino/blob/master/metrics.png?raw=true "metrics")
 
 ### 日志
 待补充
