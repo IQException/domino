@@ -6,16 +6,21 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author wang.wei
  * @since 2019/6/27
  */
-public class Refresher<V> {
+public class Refresher {
     private ScheduledThreadPoolExecutor scheduledThreadPoolExecutor;
     private Duration interval;
-    private Map<Object, RefreshTask<V>> tasks = new ConcurrentHashMap<>(1024);
+    private Map<Object, RefreshTask> tasks = new ConcurrentHashMap<>(1024);
 
     public Refresher(Duration interval, int concurrency) {
         this.interval = interval;
@@ -29,13 +34,13 @@ public class Refresher<V> {
         return tasks.containsKey(key);
     }
 
-    public boolean submit(RefreshTask<V> task) {
+    public boolean submit(RefreshTask task) {
         Object key = task.getKey();
-        RefreshTask<V> existTask = this.tasks.putIfAbsent(key, task);
+        RefreshTask existTask = this.tasks.putIfAbsent(key, task);
         // put success
         if (existTask == null) {
             existTask = this.tasks.get(key);
-            long lazySec = ThreadLocalRandom.current().nextLong(this.interval.getSeconds()) ;
+            long lazySec = ThreadLocalRandom.current().nextLong(this.interval.getSeconds());
             ScheduledFuture future = this.scheduledThreadPoolExecutor
                     .scheduleWithFixedDelay(task, lazySec, this.interval.getSeconds(),
                             TimeUnit.SECONDS);
@@ -48,9 +53,13 @@ public class Refresher<V> {
         return false;
     }
 
-    public void  remove(Object key){
-        RefreshTask task = tasks.remove(key);
-        if(task!=null){
+    public Duration getInterval() {
+        return interval;
+    }
+
+    public void remove(RefreshTask task) {
+        task = tasks.remove(task.getKey());
+        if (task != null) {
             task.getScheduledFuture().cancel(true);
         }
     }
@@ -59,6 +68,12 @@ public class Refresher<V> {
         RefreshTask task = tasks.get(key);
         if (task != null)
             task.setLastAccess(Instant.now());
+    }
+
+    public void recordUpdate(Object key) {
+        RefreshTask task = tasks.get(key);
+        if (task != null)
+            task.setLastUpdate(Instant.now());
     }
 
     public int size() {

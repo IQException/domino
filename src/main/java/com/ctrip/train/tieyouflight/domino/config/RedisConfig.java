@@ -1,7 +1,7 @@
 package com.ctrip.train.tieyouflight.domino.config;
 
-import com.ctrip.train.tieyouflight.domino.support.KeyWrapper;
-import com.ctrip.train.tieyouflight.domino.support.Serializer;
+import com.ctrip.train.tieyouflight.domino.support.serialize.KeyWrapper;
+import com.ctrip.train.tieyouflight.domino.support.serialize.Serializer;
 
 import java.time.Duration;
 
@@ -15,6 +15,15 @@ public class RedisConfig {
     private boolean cacheEmptyValues;
     private KeyWrapper keyWrapper;
     private Serializer serializer;
+    private boolean pubsub;
+
+    public boolean isPubsub() {
+        return pubsub;
+    }
+
+    public void setPubsub(boolean pubsub) {
+        this.pubsub = pubsub;
+    }
 
     public boolean isCacheEmptyValues() {
         return cacheEmptyValues;

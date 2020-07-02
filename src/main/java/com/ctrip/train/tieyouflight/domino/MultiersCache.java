@@ -3,25 +3,31 @@ package com.ctrip.train.tieyouflight.domino;
 import com.ctrip.train.tieyouflight.common.log.ContextAwareClogger;
 import com.ctrip.train.tieyouflight.domino.config.CacheConfig;
 import com.ctrip.train.tieyouflight.domino.config.CacheMetadata;
+import com.ctrip.train.tieyouflight.domino.support.CacheUtil;
+import com.ctrip.train.tieyouflight.domino.support.el.CacheOperationExpressionEvaluator;
 import com.ctrip.train.tieyouflight.domino.support.load.LoadingContext;
 import com.ctrip.train.tieyouflight.domino.support.load.MergeRequestLoaderCallback;
 import com.ctrip.train.tieyouflight.domino.support.load.MergedRequestLoader;
 import com.ctrip.train.tieyouflight.domino.support.load.MergedRequestLoaderImpl;
 import com.ctrip.train.tieyouflight.domino.support.schedule.RefreshTask;
 import com.ctrip.train.tieyouflight.domino.support.schedule.Refresher;
+import com.ctrip.train.tieyouflight.domino.support.serialize.KeyParser;
+import com.ctrip.train.tieyouflight.domino.support.serialize.SimpleKeyParser;
 import com.ctrip.train.tieyouflight.domino.support.stats.DashBoardStatsCounter;
 import com.ctrip.train.tieyouflight.domino.support.stats.StatsCounter;
-import org.springframework.cache.Cache;
+import com.google.common.collect.Lists;
+import org.springframework.context.expression.AnnotatedElementKey;
+import org.springframework.expression.EvaluationContext;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.concurrent.Callable;
 
 /**
  * @author wang.wei
  * @since 2019/5/14
  */
-public class MultiersCache implements Cache {
+public class MultiersCache implements ScheduledCache {
 
 
     private TieredCache localCache;
@@ -40,6 +46,12 @@ public class MultiersCache implements Cache {
 
     private MergedRequestLoader mergedRequestLoader;
 
+    private final AnnotatedElementKey methodCacheKey;
+
+    private final CacheOperationExpressionEvaluator evaluator = new CacheOperationExpressionEvaluator();
+
+    private final KeyParser keyParser = SimpleKeyParser.getInstance();
+
     public MultiersCache(CacheMetadata cacheMetadata, String name) {
         this.cacheMetadata = cacheMetadata;
         this.cacheConfig = cacheMetadata.getCacheConfig();
@@ -55,7 +67,7 @@ public class MultiersCache implements Cache {
         }
         this.statsCounter = new DashBoardStatsCounter(name);
         this.mergedRequestLoader = createMergedLoader();
-
+        this.methodCacheKey = new AnnotatedElementKey(cacheMetadata.getTargetMethod(), cacheMetadata.getBean().getClass());
     }
 
     protected Object lookup(Object key) {
@@ -89,19 +101,32 @@ public class MultiersCache implements Cache {
                     this.statsCounter.recordRemoteMisses(1);
                 } else if (remoteCache.isCached(key)) {
                     //cached null
-                    localCache.put(key, value);
+                    if (cacheConfig.isUseLocalCache()) {
+                        putLocal(key, value);
+                    }
                     this.statsCounter.recordRemoteHits(1);
                     return value;
                 } else {
                     this.statsCounter.recordRemoteMisses(1);
                 }
             } else {
-                localCache.put(key, value);
+                if (cacheConfig.isUseLocalCache()) {
+                    putLocal(key, value);
+                }
                 this.statsCounter.recordRemoteHits(1);
                 return value;
             }
         }
         return null;
+    }
+
+    private void putLocal(Object key, Object value) {
+
+        if (isConditionPassing(key) && !unless(key, value)) {
+            localCache.put(key, value);
+        } else {
+            localCache.evict(key);
+        }
     }
 
 
@@ -122,17 +147,13 @@ public class MultiersCache implements Cache {
         if (cacheConfig.isRefreshable())
             this.refresher.recordAccess(key);
 
-        V value;
+        V value = null;
         long start = System.currentTimeMillis();
         try {
             if ((value = (V) lookup(key)) == null && cacheConfig.isAutoLoad()) {
                 //load
-                if (cacheConfig.isSync()) {
-                    value = (V) mergedRequestLoader.load(key, new LoadingContext(valueLoader));
-                } else {
-                    value = valueLoader.call();
-                }
-                put(key,value);
+                value = (V) mergedRequestLoader.load(key, new LoadingContext(valueLoader));
+                put(key, value);
                 this.statsCounter.recordLoadSuccess(Duration.ofMillis(System.currentTimeMillis() - start));
             }
         } catch (Exception e) {
@@ -140,11 +161,22 @@ public class MultiersCache implements Cache {
             throw new RuntimeException(e.getMessage(), e);
         } finally {
             //schedule
-            if (cacheConfig.isRefreshable() && !refresher.contains(key)) {
-                RefreshTask<V> task = new RefreshTask<>(this, key, Instant.now(), valueLoader,
-                        cacheConfig,this.statsCounter, this.refresher);
-                refresher.submit(task);
-                ContextAwareClogger.info("Refresher", String.format("cache : %s , current task number : %s", getName(), refresher.size()));
+            if (cacheConfig.isRefreshable() && !refresher.contains(key) && isConditionPassing(key)) {
+                boolean refresh = false;
+                //如果不是autoLoad，先加入刷新队列，刷新之后不满足会踢出队列
+                if (!cacheConfig.isAutoLoad()) {
+                    refresh = true;
+                }
+                if (cacheConfig.isAutoLoad() && !unless(key, value)) {
+                    refresh = true;
+                }
+                if (refresh) {
+                    RefreshTask task = new RefreshTask<>(this, key, valueLoader,
+                            cacheConfig, this.statsCounter, this.refresher);
+                    refresher.submit(task);
+                    ContextAwareClogger.info("Refresher", String.format("cache : %s , current task number : %s", getName(), refresher.size()));
+                }
+
             }
         }
 
@@ -168,11 +200,35 @@ public class MultiersCache implements Cache {
     public void put(Object key, Object value) {
         //先加载到远程，本地缓存在需要时再加载
         //防止破坏本地缓存的缓存策略：本地缓存通常集合比较小，在刷新某个key的时候，本地缓存可能已经不存在这个key了
-        if (cacheConfig.isUseRemoteCache()) {
-            remoteCache.put(key, value);
-            localCache.evict(key);
-        } else if (cacheConfig.isUseLocalCache()) {
-            localCache.put(key, value);
+        if (isConditionPassing(key) && !unless(key, value)) {
+            if (cacheConfig.isUseRemoteCache()) {
+                remoteCache.put(key, value);
+                if (cacheConfig.isUseLocalCache()) {
+                    localCache.evict(key);
+                }
+            } else if (cacheConfig.isUseLocalCache()) {
+                localCache.put(key, value);
+            }
+        }
+    }
+
+    @Override
+    public boolean refresh(Object key, Object value) {
+        //先加载到远程，本地缓存在需要时再加载
+        //防止破坏本地缓存的缓存策略：本地缓存通常集合比较小，在刷新某个key的时候，本地缓存可能已经不存在这个key了
+        if (isConditionPassing(key) && !unless(key, value)) {
+            if (cacheConfig.isUseRemoteCache()) {
+                remoteCache.put(key, value);
+                if (cacheConfig.isUseLocalCache()) {
+                    localCache.evict(key);
+                }
+            } else if (cacheConfig.isUseLocalCache()) {
+                localCache.put(key, value);
+            }
+            return true;
+        } else {
+            evict(key);
+            return false;
         }
     }
 
@@ -225,5 +281,34 @@ public class MultiersCache implements Cache {
                     }
 
                 });
+    }
+
+    public void refreshUpdateTime(Object key) {
+        refresher.recordUpdate(key);
+    }
+
+
+    private boolean isConditionPassing(Object key) {
+        if (StringUtils.hasText(this.cacheConfig.getCond())) {
+            EvaluationContext evaluationContext = createEvaluationContext(key, CacheOperationExpressionEvaluator.NO_RESULT);
+            return evaluator.condition(this.cacheConfig.getCond(),
+                    this.methodCacheKey, evaluationContext);
+        }
+        return true;
+    }
+
+    private boolean unless(Object key, Object result) {
+        if (StringUtils.hasText(this.cacheConfig.getExcept())) {
+            EvaluationContext evaluationContext = createEvaluationContext(key, result);
+            return evaluator.unless(this.cacheConfig.getExcept(), this.methodCacheKey, evaluationContext);
+        }
+        return false;
+    }
+
+
+    private EvaluationContext createEvaluationContext(Object key, Object result) {
+        return evaluator.createEvaluationContext(Lists.newArrayList(this), this.cacheMetadata.getTargetMethod(),
+                this.keyParser.parse(this.cacheMetadata.getTargetMethod(), key),
+                CacheUtil.getProxyTarget(this.cacheMetadata.getBean()), this.cacheMetadata.getTargetClass(), result, cacheMetadata.getBeanFactory());
     }
 }

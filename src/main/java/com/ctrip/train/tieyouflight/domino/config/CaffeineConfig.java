@@ -1,7 +1,6 @@
 package com.ctrip.train.tieyouflight.domino.config;
 
-import com.ctrip.train.tieyouflight.domino.support.KeyWrapper;
-import com.ctrip.train.tieyouflight.domino.support.Serializer;
+import com.ctrip.train.tieyouflight.domino.support.serialize.Serializer;
 
 import java.time.Duration;
 

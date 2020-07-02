@@ -1,5 +1,8 @@
 package com.ctrip.train.tieyouflight.domino.config;
 
+import org.springframework.beans.factory.BeanFactory;
+
+import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 
 /**
@@ -18,7 +21,29 @@ public class CacheMetadata {
 
     private Object bean;
 
-    private String methodName;
+    private Method targetMethod;
+
+    private Class targetClass;
+
+    private BeanFactory beanFactory;
+
+    public BeanFactory getBeanFactory() {
+        return beanFactory;
+    }
+
+    public CacheMetadata setBeanFactory(BeanFactory beanFactory) {
+        this.beanFactory = beanFactory;
+        return this;
+    }
+
+    public Class getTargetClass() {
+        return targetClass;
+    }
+
+    public CacheMetadata setTargetClass(Class targetClass) {
+        this.targetClass = targetClass;
+        return this;
+    }
 
     public Object getBean() {
         return bean;
@@ -39,12 +64,17 @@ public class CacheMetadata {
     }
 
     public String getMethodName() {
-        return methodName;
+        return targetMethod.getName();
     }
 
-    public CacheMetadata setMethodName(String methodName) {
-        this.methodName = methodName;
+    public Method getTargetMethod() {
+        return targetMethod;
+    }
+
+    public CacheMetadata setTargetMethod(Method targetMethod) {
+        this.targetMethod = targetMethod;
         return this;
+
     }
 
     public CacheConfig getCacheConfig() {

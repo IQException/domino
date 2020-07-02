@@ -26,7 +26,6 @@ import org.springframework.util.Assert;
 import java.lang.reflect.Type;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 
 /**
@@ -66,14 +65,15 @@ public class CRedisCacheManager implements TieredCacheManager {
 
     @Override
     public TieredCache getCache(String name, CacheMetadata cacheMetadata) {
-        return cacheMap.computeIfAbsent(name,key->{
+        return cacheMap.computeIfAbsent(name, key -> {
             RedisConfig redisCacheConfig = new RedisConfig();
             CacheConfig cacheConfig = cacheMetadata.getCacheConfig();
             redisCacheConfig.setCacheNullValues(cacheConfig.isCacheNullValues())
                     .setCacheEmptyValues(cacheConfig.isCacheEmptyValues())
                     .setKeyWrapper(cacheConfig.getKeyWrapper())
                     .setSerializer(cacheConfig.getSerializer())
-                    .setTtl(cacheConfig.getRemoteExpireTime());
+                    .setTtl(cacheConfig.getRemoteExpireTime())
+                    .setPubsub(cacheConfig.isUseLocalCache());
             return createRedisCache(name, redisCacheConfig, cacheMetadata.getKeyType(), cacheMetadata.getValueType(), cacheMetadata.getMethodParamTypes());
         });
     }

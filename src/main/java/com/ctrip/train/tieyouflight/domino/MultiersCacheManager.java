@@ -7,9 +7,9 @@ import com.ctrip.train.tieyouflight.domino.config.CacheMetadata;
 import com.ctrip.train.tieyouflight.domino.config.Domino;
 import com.ctrip.train.tieyouflight.domino.config.MultiersCacheProperties;
 import com.ctrip.train.tieyouflight.domino.support.CRedisPubSub;
-import com.ctrip.train.tieyouflight.domino.support.JsonSerializer;
-import com.ctrip.train.tieyouflight.domino.support.KeyWrapper;
-import com.ctrip.train.tieyouflight.domino.support.Serializer;
+import com.ctrip.train.tieyouflight.domino.support.serialize.JsonSerializer;
+import com.ctrip.train.tieyouflight.domino.support.serialize.KeyWrapper;
+import com.ctrip.train.tieyouflight.domino.support.serialize.Serializer;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
@@ -24,27 +24,34 @@ import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.cache.interceptor.KeyGenerator;
-import org.springframework.cache.interceptor.SimpleKeyGenerator;
+import org.springframework.cache.interceptor.SimpleKey;
 import org.springframework.cache.support.AbstractCacheManager;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
+import org.springframework.context.ApplicationEvent;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.util.ReflectionUtils;
 import qunar.tc.qconfig.client.MapConfig;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.time.Duration;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author wang.wei
  * @since 2019/5/14
  */
-public class MultiersCacheManager extends AbstractCacheManager implements ApplicationContextAware {
+public class MultiersCacheManager extends AbstractCacheManager implements ApplicationContextAware, ApplicationListener {
 
     private final String KEY_JOINER = "::";
 
@@ -81,14 +88,7 @@ public class MultiersCacheManager extends AbstractCacheManager implements Applic
     protected Collection<? extends Cache> loadCaches() {
         List<Cache> caches = Lists.newArrayListWithCapacity(loadOnStartUpCaches.size());
         for (String cacheName : loadOnStartUpCaches) {
-            CacheMetadata cacheMetadata = cacheMetadataMap.get(cacheName);
-            try {
-                Method method = cacheMetadata.getBean().getClass().getMethod(cacheMetadata.getMethodName());
-                method.invoke(cacheMetadata.getBean());
-                caches.add(getCache(cacheName));
-            } catch (Exception e) {
-                throw new RuntimeException(e.getMessage(), e);
-            }
+            caches.add(getCache(cacheName));
         }
         return caches;
     }
@@ -112,13 +112,28 @@ public class MultiersCacheManager extends AbstractCacheManager implements Applic
      * @param cacheName
      * @param keyStr
      */
-    public void refreshLocalCache(String cacheName, String keyStr) {
+    public void evictLocalCache(String cacheName, String keyStr) {
         CacheMetadata metadata = cacheMetadataMap.get(cacheName);
-        TieredCache localCache = localCacheManager.getCache(cacheName, metadata);
-        Serializer.Context context = new Serializer.Context(metadata.getKeyType(), metadata.getValueType(), metadata.getMethodParamTypes());
-        Object key = metadata.getCacheConfig().getSerializer().deserializeKey(metadata.getCacheConfig().getKeyWrapper().unwrap(keyStr), context);
-        localCache.evict(key);
+        if (metadata.getCacheConfig().isUseLocalCache()) {
+            TieredCache localCache = localCacheManager.getCache(cacheName, metadata);
+            Serializer.Context context = new Serializer.Context(metadata.getKeyType(), metadata.getValueType(), metadata.getMethodParamTypes());
+            Object key = metadata.getCacheConfig().getSerializer().deserializeKey(metadata.getCacheConfig().getKeyWrapper().unwrap(keyStr), context);
+            localCache.evict(key);
+        }
     }
+
+
+    public void refreshUpdateTime(String cacheName, String keyStr) {
+        CacheMetadata metadata = cacheMetadataMap.get(cacheName);
+        if (metadata.getCacheConfig().isRefreshable()) {
+            MultiersCache cache = (MultiersCache) getCache(cacheName);
+            Serializer.Context context = new Serializer.Context(metadata.getKeyType(), metadata.getValueType(), metadata.getMethodParamTypes());
+            Object key = metadata.getCacheConfig().getSerializer().deserializeKey(metadata.getCacheConfig().getKeyWrapper().unwrap(keyStr), context);
+            cache.refreshUpdateTime(key);
+        }
+
+    }
+
 
     @Override
     public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
@@ -141,82 +156,59 @@ public class MultiersCacheManager extends AbstractCacheManager implements Applic
                 Method[] methods = clazz.getDeclaredMethods();
                 for (Method method : methods) {
 
-                    Cacheable cacheable = AnnotationUtils.findAnnotation(method, Cacheable.class);
                     Domino domino = AnnotationUtils.findAnnotation(method, Domino.class);
-                    if (domino == null && cacheable == null) continue;
+                    if (domino == null) continue;
                     //不支持集合类型参数
                     validateParamTypes(clazz, method);
                     String errorSuffix = String.format(" On class : %s, method : %s ", clazz, method);
-                    if (cacheable == null) {
-                        throw new RuntimeException(String.format("domino rely on spring cache,so please add @Cacheable.  %s ", errorSuffix));
-                    } else {
-                        if (domino == null) {
-                            if (springCacheManager == null) {
-                                throw new RuntimeException(String.format("there is only a @Cacheable and  no @Domino ,imply that " +
-                                        "this method will be managed by spring cache. but no configured SpringCacheManager. %s", errorSuffix));
-                            }
-                        } else {
-                            if (cacheable.value().length > 1 || cacheable.cacheNames().length > 1)
-                                throw new RuntimeException(String.format("only support single cacheName per @Cacheable ! please check configuration. %s", errorSuffix));
-                            if (StringUtils.isNotBlank(cacheable.cacheManager()) || StringUtils.isNotBlank(cacheable.cacheResolver()))
-                                throw new RuntimeException(String.format("please do not configure any cacheManager or cacheResolver " +
-                                        "in class : %s ,method : %s ,'cause configured @Domino .", clazz, method));
-                            if (!cacheable.sync())
-                                throw new RuntimeException(String.format("only support @Cacheable(sync=true) ! please check sync value. %s", errorSuffix));
 
-                            String cacheName = cacheable.value().length > 0 ? cacheable.value()[0] : cacheable.cacheNames()[0];
-                            if(cacheMetadataMap.containsKey(cacheName))
-                                throw new RuntimeException("do not support sharing cache among several methods,'cause different method has different args,need different serializer");
-                            CacheConfig cacheConfig = buildCacheConfig(cacheName, domino, errorSuffix);
-                            validateCacheConfig(cacheConfig);
-                            //FIXME 丑陋实现
-                            if (cacheConfig.isUseRemoteCache() && cacheConfig.getRemoteCacheManager() instanceof CRedisCacheManager) {
-                                CRedisCacheManager cRedisCacheManager = (CRedisCacheManager) cacheConfig.getRemoteCacheManager();
-                                cRedisCacheManager.setRedisPubSub(new CRedisPubSub(this));
-                            }
+                    String cacheName = domino.name();
+                    if (cacheMetadataMap.containsKey(cacheName))
+                        throw new RuntimeException("do not support sharing cache among several methods,'cause different method has different args,need different serializer");
 
-                            CacheMetadata cacheMetadata = new CacheMetadata();
-                            cacheMetadata.setCacheConfig(cacheConfig);
-                            if (Optional.class == method.getReturnType()) {
-                                ParameterizedType parameterizedType = (ParameterizedType) method.getGenericReturnType();
-                                cacheMetadata.setValueType(parameterizedType.getActualTypeArguments()[0]);
-                            } else {
-                                cacheMetadata.setValueType(wrapPrimitiveType(method.getGenericReturnType()));
-                            }
-                            //见 SimpleKeyGenerator
-                            Class kgClass = SimpleKeyGenerator.class;
-                            if (StringUtils.isNotBlank(cacheable.keyGenerator())) {
-                                kgClass = applicationContext.getBean(cacheable.keyGenerator(), KeyGenerator.class).getClass();
-                            }
-                            if (StringUtils.isNotBlank(cacheable.key())) {
-                                cacheMetadata.setKeyType(String.class);
-                            } else if (method.getParameterTypes().length == 1 && kgClass == SimpleKeyGenerator.class) {
-                                cacheMetadata.setKeyType(wrapPrimitiveType(method.getGenericParameterTypes()[0]));
-                            } else {
-                                cacheMetadata.setKeyType(wrapPrimitiveType(domino.keyType()));
-                            }
-                            cacheMetadata.setMethodParamTypes(wrapPrimitiveType(method.getGenericParameterTypes()));
-                            cacheMetadata.setBean(applicationContext.getBean(beanName));
-                            cacheMetadata.setMethodName(method.getName());
-                            cacheMetadataMap.put(cacheName, cacheMetadata);
+                    CacheConfig cacheConfig = buildCacheConfig(cacheName, domino, errorSuffix);
+                    validateCacheConfig(cacheConfig);
 
-
-                            if (domino.loadOnStartUp()) {
-                                Type[] paramType = method.getGenericParameterTypes();
-                                if (paramType != null && paramType.length > 0) {
-                                    throw new RuntimeException(String.format("only support loadOnStartUp on methods that have no param signature. %s", errorSuffix));
-                                }
-                                loadOnStartUpCaches.add(cacheName);
-                            }
-                        }
+                    //FIXME 丑陋实现
+                    if (cacheConfig.isUseRemoteCache() && cacheConfig.getRemoteCacheManager() instanceof CRedisCacheManager) {
+                        CRedisCacheManager cRedisCacheManager = (CRedisCacheManager) cacheConfig.getRemoteCacheManager();
+                        cRedisCacheManager.setRedisPubSub(new CRedisPubSub(this));
                     }
+
+                    CacheMetadata cacheMetadata = new CacheMetadata();
+                    cacheMetadata.setBeanFactory(applicationContext);
+                    cacheMetadata.setCacheConfig(cacheConfig);
+                    cacheMetadata.setTargetClass(clazz);
+                    cacheMetadata.setTargetMethod(method);
+                    cacheMetadata.setBean(applicationContext.getBean(beanName));
+
+                    if (Optional.class == method.getReturnType()) {
+                        ParameterizedType parameterizedType = (ParameterizedType) method.getGenericReturnType();
+                        cacheMetadata.setValueType(parameterizedType.getActualTypeArguments()[0]);
+                    } else {
+                        cacheMetadata.setValueType(wrapPrimitiveType(method.getGenericReturnType()));
+                    }
+                    //见 SimpleKeyGenerator
+                    if (method.getParameterTypes().length == 1) {
+                        cacheMetadata.setKeyType(wrapPrimitiveType(method.getGenericParameterTypes()[0]));
+                    } else {
+                        cacheMetadata.setKeyType(SimpleKey.class);
+                    }
+                    cacheMetadata.setMethodParamTypes(wrapPrimitiveType(method.getGenericParameterTypes()));
+                    cacheMetadataMap.put(cacheName, cacheMetadata);
+
+                    if (domino.loadOnStartUp()) {
+                        Type[] paramType = method.getGenericParameterTypes();
+                        if (paramType != null && paramType.length > 0) {
+                            throw new RuntimeException(String.format("only support loadOnStartUp on methods that have no param signature. %s", errorSuffix));
+                        }
+                        loadOnStartUpCaches.add(cacheName);
+                    }
+
                 }
                 clazz = clazz.getSuperclass();
             }
-
         }
-
-
     }
 
     private Type wrapPrimitiveType(Type type) {
@@ -245,10 +237,11 @@ public class MultiersCacheManager extends AbstractCacheManager implements Applic
                 .setCacheNullValues(domino.cacheNullValues())
                 .setCacheEmptyValues(domino.cacheEmptyValues())
                 .setRefreshable(domino.refreshable())
-                .setSync(domino.sync())
                 .setKeyWrapper(buildKeyWrapper(cacheName, domino.keyPrefix()))
                 .setUseLocalCache(domino.useLocalCache())
-                .setUserRemoteCache(domino.useRemoteCache());
+                .setUseRemoteCache(domino.useRemoteCache())
+                .setExcept(domino.except())
+                .setCond(domino.cond());
 
         if (domino.refreshable()) {
             if (domino.retries() == Domino.UNSET_INT) {
@@ -297,10 +290,10 @@ public class MultiersCacheManager extends AbstractCacheManager implements Applic
                 if (refreshTimeout == null) {
                     cacheConfig.setRefreshTimeout(cacheConfig.getInterval().multipliedBy(2));
                 } else {
-                    cacheConfig.setRefreshTimeout(Duration.ofSeconds(refreshTimeout));
+                    cacheConfig.setRefreshTimeout(Duration.ofSeconds(Math.min(refreshTimeout, 3600 * 24 * 180)));
                 }
             } else {
-                cacheConfig.setRefreshTimeout(Duration.ofSeconds(domino.refreshTimeout()));
+                cacheConfig.setRefreshTimeout(Duration.ofSeconds(Math.min(domino.refreshTimeout(), 3600 * 24 * 180)));
             }
         }
 
@@ -393,6 +386,7 @@ public class MultiersCacheManager extends AbstractCacheManager implements Applic
         };
     }
 
+
     private void validateCacheConfig(CacheConfig cacheConfig) {
         if (cacheConfig.isUseLocalCache()) {
             Preconditions.checkArgument(cacheConfig.getLocalExpireTime().getSeconds() >= 0, "localExpireTime cannot be negative !");
@@ -411,15 +405,51 @@ public class MultiersCacheManager extends AbstractCacheManager implements Applic
         }
     }
 
-    public static void validateParamTypes(Class<?> clazz, Method method) {
+    private void validateParamTypes(Class<?> clazz, Method method) {
+
         for (Class<?> paramType : method.getParameterTypes()) {
             if (Collection.class.isAssignableFrom(paramType) || Map.class.isAssignableFrom(paramType) || clazz.isArray()) {
                 throw new IllegalArgumentException(
-                        String.format("domino do not support Collection or Map or Array paramType ," +
-                                "because the key will be over large and cache miss ! in class : %s, method : %s ", clazz, method));
+                        String.format("domino do not support Collection or Map or Array paramType and param's field type (recursively)," +
+                                "because the key will be over large and result in cache miss ! in class : %s, method : %s ", clazz, method));
+            }
+            if (clazz != paramType) {
+                validateCacheKeyType(paramType);
+            }
+        }
+
+    }
+
+    private void validateCacheKeyType(Class<?> clazz) {
+
+        if (clazz == Object.class || clazz == String.class || ClassUtils.isPrimitiveOrWrapper(clazz))
+            return;
+
+        ReflectionUtils.doWithFields(clazz, field -> {
+            if (Collection.class.isAssignableFrom(field.getType()) || Map.class.isAssignableFrom(field.getType()) || clazz.isArray()) {
+                throw new IllegalArgumentException(
+                        String.format("domino do not support Collection or Map or Array paramType and param's field type (recursively)," +
+                                "because the key will be over large and result in cache miss ! in class : %s, field : %s ", clazz, field));
+            }
+            if (field.getType() != clazz) {
+                validateCacheKeyType(field.getType());
+            }
+        });
+
+    }
+
+    @Override
+    public void onApplicationEvent(ApplicationEvent event) {
+        if (event instanceof ContextRefreshedEvent) {
+            for (String cacheName : loadOnStartUpCaches) {
+                CacheMetadata cacheMetadata = cacheMetadataMap.get(cacheName);
+                try {
+                    Method method = cacheMetadata.getBean().getClass().getMethod(cacheMetadata.getMethodName());
+                    method.invoke(cacheMetadata.getBean());
+                } catch (Exception e) {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
             }
         }
     }
-
-
 }

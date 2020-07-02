@@ -1,8 +1,8 @@
 package com.ctrip.train.tieyouflight.domino.config;
 
 import com.ctrip.train.tieyouflight.domino.TieredCacheManager;
-import com.ctrip.train.tieyouflight.domino.support.KeyWrapper;
-import com.ctrip.train.tieyouflight.domino.support.Serializer;
+import com.ctrip.train.tieyouflight.domino.support.serialize.KeyWrapper;
+import com.ctrip.train.tieyouflight.domino.support.serialize.Serializer;
 
 import java.time.Duration;
 
@@ -15,13 +15,11 @@ public class CacheConfig {
 
     private boolean autoLoad;
 
-    private boolean sync;
-
     private boolean useLocalCache;
 
     private TieredCacheManager localCacheManager;
 
-    private boolean userRemoteCache;
+    private boolean useRemoteCache;
 
     private TieredCacheManager remoteCacheManager;
 
@@ -51,12 +49,34 @@ public class CacheConfig {
 
     private KeyWrapper keyWrapper;
 
+    private String cond;
+
+    private String except;
+
     public int getRetries() {
         return retries;
     }
 
     public boolean isCacheEmptyValues() {
         return cacheEmptyValues;
+    }
+
+    public String getCond() {
+        return cond;
+    }
+
+    public CacheConfig setCond(String cond) {
+        this.cond = cond;
+        return this;
+    }
+
+    public String getExcept() {
+        return except;
+    }
+
+    public CacheConfig setExcept(String except) {
+        this.except = except;
+        return this;
     }
 
     public CacheConfig setCacheEmptyValues(boolean cacheEmptyValues) {
@@ -101,15 +121,6 @@ public class CacheConfig {
         return this;
     }
 
-    public boolean isSync() {
-        return sync;
-    }
-
-    public CacheConfig setSync(boolean sync) {
-        this.sync = sync;
-        return this;
-    }
-
     public boolean isAutoLoad() {
         return autoLoad;
     }
@@ -138,11 +149,11 @@ public class CacheConfig {
     }
 
     public boolean isUseRemoteCache() {
-        return userRemoteCache;
+        return useRemoteCache;
     }
 
-    public CacheConfig setUserRemoteCache(boolean userRemoteCache) {
-        this.userRemoteCache = userRemoteCache;
+    public CacheConfig setUseRemoteCache(boolean userRemoteCache) {
+        this.useRemoteCache = userRemoteCache;
         return this;
     }
 

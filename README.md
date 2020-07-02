@@ -41,27 +41,13 @@
 ```
 使用springboot autoconfigure，只需引入jar包即可。
 
-#### custom
-
-支持自定义序列化和本地、远程缓存manager，兼容springcache。（文档待补充）
 
 #### annotation
-由于依托于spring @Cacheable(sync=true)，首先方法上应当打上这个注解，再打@Domino注解加以设置。具体配置见@Domino
+依托于spring @Cacheable， 使用meta-annotation二次开发，支持@Cacheable的大多数配置参数：@Domino(cond)=@Cacheable(condition);@Domino(except)=@Cacheable(unless)
 
 ```java
-    @Domino(refreshable = false)
-    @Cacheable(value = "TyUserCoreServiceStub.getUserMapping", sync = true)
-    public UserMappingDTO getUserMapping(String ctripUserId) throws Exception {
-        GetUserMappingInnerRequestType mappingRequest = new GetUserMappingInnerRequestType();
-        mappingRequest.setCtripUid(ctripUserId);
-        UserMappingDTO userMapping = client.getUserMappingInner(mappingRequest).getUserMapping();
-
-        Map<String, String> logTags = Maps.newHashMap();
-        logTags.put("ctripUserId", ctripUserId);
-        ContextAwareClogger.info("TyUserCoreServiceStub.getUserMapping", JSON.toJSONString(userMapping), logTags);
-
-        return userMapping;
-    }
+    @Domino(refreshable = true, name = "CommonPassengerStub.getCommonPassengers", except = "#result==null||#result.size()<=20")
+    public List<CommonPassengerBO> getCommonPassengers(String ctripUId) throws Exception {}
 ```
 
 #### qconfig
@@ -79,49 +65,75 @@ tag见DashBoardStatsCounter
 1. springcache基于代理实现，所以类内调用(同一类的A方法调B方法)不会走缓存；如果需要走缓存，请在bean内配置当前bean，调用缓存方法使用bean.B. 示例如下
 ```java
 @Component
-public class TyUserCoreServiceStub {
-
-    private static TyUserCoreServiceClient client = TyUserCoreServiceClient.getInstance();
+public class CommonPassengerStub {
+    private static final String LTP = "CommonPassengerStub.";
+    private static BbzmbrcommonpassengerClient client = BbzmbrcommonpassengerClient.getInstance();
 
     @Resource
-    private TyUserCoreServiceStub self;
+    private CommonPassengerStub self;
 
-
-    public int getTrainTravelCount(String partner, int tyUserId) {
-        GetUserBizInnerResponseType userBizInner;
-
-        try {
-            userBizInner = self.getUserBizInner(partner, tyUserId);
-            if (userBizInner != null) return userBizInner.getTrainTravelNum();
-        } catch (Exception e) {
-            Map<String, String> logTags = Maps.newHashMap();
-            logTags.put("partner", partner);
-            logTags.put("tyUserId", String.valueOf(tyUserId));
-            ContextAwareClogger.error("TyUserCoreServiceStub.getTrainTravelCount", e, logTags);
-        }
-        return 0;
+    public static BbzmbrcommonpassengerClient getClient() {
+        return client;
     }
 
-    @Domino(refreshable = false)
-    @Cacheable(value = "TyUserCoreServiceStub.getUserBizInner", sync = true)
-    public GetUserBizInnerResponseType getUserBizInner(String partner, int tyUserId) throws Exception {
-        GetUserBizInnerRequestType request = new GetUserBizInnerRequestType();
-        request.setTyUserId(tyUserId);
-        request.setPartner(partner);
-        GetUserBizInnerResponseType userBizInner = client.getUserBizInner(request);
-        if (userBizInner.getResultCode() != 1) {
-            userBizInner = null;
-        }
-        Map<String, String> logTags = Maps.newHashMap();
-        logTags.put("partner", partner);
-        logTags.put("tyUserId", String.valueOf(tyUserId));
-        ContextAwareClogger.info("TyUserCoreServiceStub.getUserBizInner", JacksonSerializer.DEFAULT.serialize(userBizInner), logTags);
-        return userBizInner;
-
+    static {
+        client.setConnectTimeout(1000);
+        client.setRequestTimeout(1000);
+        client.setSocketTimeout(1000);
+        client.setFormat("json");
     }
+
+    public List<CommonPassengerBO> getCommonPassengers(String ctripUId, int limit) throws Exception {
+
+        List<CommonPassengerBO> commonPassengers = self.getCommonPassengers(ctripUId);
+
+        if (limit > 0 && commonPassengers != null) {
+            return commonPassengers.stream().limit(limit).collect(Collectors.toList());
+        }
+        return commonPassengers;
+    }
+    
+    @Domino(refreshable = true, name = "CommonPassengerStub.getCommonPassengers", except = "#result==null||#result.size()<=20")
+    public List<CommonPassengerBO> getCommonPassengers(String ctripUId) throws Exception {
+
+        String logTitle = LTP + "getCommonPassengers";
+
+        GetCommonPassengerRequestType request = new GetCommonPassengerRequestType();
+        request.setUID(ctripUId);
+        ParameterItem parameterItem = new ParameterItem("BizType", "TRA");
+        request.setParameterList(Arrays.asList(parameterItem));
+        QueryCondition queryCondition1 = new QueryCondition("PageIndex", "1");
+        QueryCondition queryCondition2 = new QueryCondition("PageSize", "50");
+        request.setQueryConditionList(Arrays.asList(queryCondition1, queryCondition2));
+
+        GetCommonPassengerResponseType response = client.getCommonPassenger(request);
+
+        List<CommonPassenger> commonPassengers = MoreObjects.firstNonNull(response.getCommonPassengers(), Lists.newArrayList());
+
+        List<CommonPassengerBO> commonPassengerBOS = Lists.newArrayList();
+        for (CommonPassenger commonPassenger : commonPassengers) {
+            if (CollectionUtils.isEmpty(commonPassenger.getCommonPassengerCardList())) {
+                continue;
+            }
+            CommonPassengerCard commonPassengerCard = commonPassenger.getCommonPassengerCardList().stream().filter(passengerCard ->
+                    "1".equals(passengerCard.getCardType()) && StringUtils.isNotBlank(passengerCard.getCardNo())).findFirst().orElse(null);
+
+            if (commonPassengerCard != null) {
+                commonPassengerBOS.add(new CommonPassengerBO(commonPassenger.getCNName(), PassportType.Identity_Card.getName(), commonPassengerCard.getCardNo()));
+            }
+        }
+
+        CLogger.logRequestResponse(logTitle, request, StringUtils.EMPTY);
+
+        return commonPassengerBOS;
+    }
+
+
+
 
 }
 ```
+2. 缓存的数据模型发生变化需要修改缓存名称，防止反序列化错误。例如方法返回的响应由class A换到了class B，则需要修改注解中的缓存名称
    
 ### TODO
 0. **优化metric和日志**
@@ -131,4 +143,4 @@ public class TyUserCoreServiceStub {
 5. 支持@CachePut
 6. 支持@CacheEvict
 7. redisPubSub改造(事件驱动，线程池)
-8. 增加扩展点
+8. 增加扩展点：metric/cache provider/cache manager

@@ -32,7 +32,8 @@ public class CRedisPubSub extends RedisPubSub {
         logtags.put("message", message);
         try {
             ContextAwareClogger.info(LOG_TITLE, "message received!", logtags);
-            cacheManager.refreshLocalCache(getCacheName(channel), message);
+            cacheManager.evictLocalCache(getCacheName(channel), message);
+            cacheManager.refreshUpdateTime(getCacheName(channel), message);
         } catch (Exception e) {
             ContextAwareClogger.error(LOG_TITLE, e, logtags);
         }

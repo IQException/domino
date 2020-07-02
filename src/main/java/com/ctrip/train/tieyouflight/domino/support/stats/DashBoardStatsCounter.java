@@ -4,8 +4,6 @@ import com.ctrip.framework.clogging.agent.metrics.aggregator.MetricsAggregator;
 import com.ctrip.framework.clogging.agent.metrics.aggregator.MetricsAggregatorFactory;
 
 import java.time.Duration;
-import java.time.temporal.TemporalUnit;
-
 /**
  * @author wang.wei
  * @since 2019/6/30

@@ -3,6 +3,7 @@ package com.ctrip.train.tieyouflight.domino;
 import com.ctrip.train.tieyouflight.common.log.ContextAwareClogger;
 import com.ctrip.train.tieyouflight.domino.config.RedisConfig;
 import com.ctrip.train.tieyouflight.domino.support.*;
+import com.ctrip.train.tieyouflight.domino.support.serialize.Serializer;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
 import credis.java.client.CacheProvider;
@@ -41,16 +42,19 @@ public class CRedisCache extends AbstractTieredCache {
         this.cacheConfig = cacheConfig;
         this.serializeContext = new Serializer.Context(keyType, valueType, parameterTypes);
 
-        new Thread(() -> {
-            //cacheProvider.subscribe内部实现：订阅之后会循环获取消息，发送给redisPubSub。
-            while (true) {
-                try {
-                    cacheProvider.subscribe(redisPubSub, CRedisPubSub.getChannel(getName()));
-                } catch (Exception e) {
-                    ContextAwareClogger.error(LOG_TITLE, e);
+        if (cacheConfig.isPubsub()) {
+            new Thread(() -> {
+                //cacheProvider.subscribe内部实现：订阅之后会循环获取消息，发送给redisPubSub。
+                while (true) {
+                    try {
+                        cacheProvider.subscribe(redisPubSub, CRedisPubSub.getChannel(getName()));
+                    } catch (Exception e) {
+                        ContextAwareClogger.error(LOG_TITLE, e);
+                    }
                 }
-            }
-        }).start();
+            },"Domino-CRedisPubSub-"+name).start();
+        }
+
 
     }
 

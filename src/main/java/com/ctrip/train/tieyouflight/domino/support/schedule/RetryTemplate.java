@@ -3,7 +3,6 @@ package com.ctrip.train.tieyouflight.domino.support.schedule;
 import com.ctrip.train.tieyouflight.common.log.ContextAwareClogger;
 
 import java.util.concurrent.Callable;
-import java.util.function.Predicate;
 
 /**
  * @author wang.wei
@@ -12,13 +11,13 @@ import java.util.function.Predicate;
 public class RetryTemplate {
     private static final String LOG_TITLE = "RetryTemplate";
 
-    public static <V> RetryResult<V> tryTodo(Callable<V> callable, Predicate<V> validator, int retries) {
+    public static <V> RetryResult<V> tryTodo(Callable<V> callable, int retries) {
         boolean succeed = false;
         V result = null;
         while (retries >= 0 && !succeed) {
             try {
                 result = callable.call();
-                succeed = validator.test(result);
+                succeed = true;
             } catch (Exception e) {
                 ContextAwareClogger.warn(LOG_TITLE, e);
             } finally {

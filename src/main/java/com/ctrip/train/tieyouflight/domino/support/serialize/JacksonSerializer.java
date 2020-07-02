@@ -1,4 +1,4 @@
-package com.ctrip.train.tieyouflight.domino.support;
+package com.ctrip.train.tieyouflight.domino.support.serialize;
 
 import com.ctrip.soa.caravan.common.serializer.*;
 import com.ctrip.soa.caravan.common.value.CollectionValues;
@@ -20,8 +20,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.GregorianCalendar;
 import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentMap;

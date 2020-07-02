@@ -1,4 +1,4 @@
-package com.ctrip.train.tieyouflight.domino.support;
+package com.ctrip.train.tieyouflight.domino.support.serialize;
 
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.KeyDeserializer;

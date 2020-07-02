@@ -1,11 +1,10 @@
-package com.ctrip.train.tieyouflight.domino.support;
+package com.ctrip.train.tieyouflight.domino.support.serialize;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
 
 import java.io.IOException;
-import java.io.StringWriter;
 
 /**
  * @author wang.wei
@@ -15,7 +14,7 @@ public class DefaultKeySerializer extends StdSerializer {
 
     private JacksonSerializer jacksonSerializer = JacksonSerializer.DEFAULT;
 
-    protected DefaultKeySerializer(Class t) {
+    public DefaultKeySerializer(Class t) {
         super(t);
     }
 

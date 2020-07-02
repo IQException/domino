@@ -1,7 +1,7 @@
 package com.ctrip.train.tieyouflight.domino.support.load;
 
 import com.ctrip.train.tieyouflight.common.log.ContextAwareClogger;
-import com.ctrip.train.tieyouflight.domino.support.JsonSerializer;
+import com.ctrip.train.tieyouflight.domino.support.serialize.JsonSerializer;
 import com.google.common.collect.Maps;
 
 import java.util.Map;
